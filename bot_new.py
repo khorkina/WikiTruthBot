@@ -581,58 +581,15 @@ class WikiBot:
             # Update state
             USER_STATE[chat_id] = "READING_ARTICLE"
             
-            # Send the full article content
-            content = article['content']
+            # Split content into sections
+            sections = split_content_into_sections(article['content'])
             
-            # Split into chunks if too long (Telegram has a 4096 char limit)
-            chunks = []
-            max_length = 3000  # Leave room for formatting
+            # Store sections in user data
+            user_data['article_sections'] = sections
+            user_data['current_section'] = 0
             
-            while content:
-                if len(content) <= max_length:
-                    chunks.append(content)
-                    break
-                
-                # Find a good breaking point
-                split_point = content[:max_length].rfind('\n\n')
-                if split_point == -1:
-                    split_point = content[:max_length].rfind('\n')
-                if split_point == -1:
-                    split_point = content[:max_length].rfind('. ')
-                if split_point == -1:
-                    split_point = max_length
-                
-                chunks.append(content[:split_point+1])
-                content = content[split_point+1:]
-            
-            # Send each chunk
-            for i, chunk in enumerate(chunks):
-                if i == 0:
-                    await self.bot.sendMessage(
-                        chat_id,
-                        f"*{article['title']}*\n\n{chunk}",
-                        parse_mode="Markdown"
-                    )
-                else:
-                    await self.bot.sendMessage(
-                        chat_id,
-                        chunk,
-                        parse_mode="Markdown"
-                    )
-            
-            # Add back to article button
-            keyboard = [[
-                InlineKeyboardButton(
-                    text="Back to Article", 
-                    callback_data="back_to_article"
-                )
-            ]]
-            
-            await self.bot.sendMessage(
-                chat_id,
-                "End of article.",
-                reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard)
-            )
+            # Display the first section
+            await self.display_article_section(chat_id, message_id, article, 0)
         
         elif action == "languages":
             # Show available languages
@@ -748,8 +705,7 @@ class WikiBot:
                 with open(doc_path, 'rb') as doc_file:
                     await self.bot.sendDocument(
                         chat_id,
-                        document=doc_file,
-                        filename=f"{article['title']}.docx"
+                        document=doc_file
                     )
                 
                 # Clean up
@@ -1322,8 +1278,7 @@ class WikiBot:
             with open(doc_path, 'rb') as doc_file:
                 await self.bot.sendDocument(
                     chat_id,
-                    document=doc_file,
-                    filename=f"{translated_article['title']}_{target_lang}.docx"
+                    document=doc_file
                 )
             
             # Clean up
