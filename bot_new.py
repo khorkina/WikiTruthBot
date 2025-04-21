@@ -510,9 +510,20 @@ class WikiBot:
             if article:
                 await self.display_article_section(chat_id, message_id, article, section_index)
                 
+        # Handle translated section navigation
+        elif query_data.startswith("trans_section:"):
+            section_index = int(query_data.split(":", 1)[1])
+            article = USER_DATA[chat_id].get('translated_article')
+            if article:
+                await self.display_translated_section(chat_id, message_id, article, section_index)
+                
         # Handle section translation
         elif query_data.startswith("translate_section:"):
             await self.handle_translate_section(chat_id, message_id, query_data)
+            
+        # Handle section translation language selection
+        elif query_data.startswith("section_translate:"):
+            await self.handle_section_translate(chat_id, message_id, query_data)
         
         # Handle navigation actions
         elif query_data == "new_search":
@@ -1271,64 +1282,18 @@ class WikiBot:
             )
             return
         
-        # Get language info
-        source_lang = user_data.get('language', DEFAULT_LANGUAGE)
-        target_lang = user_data.get('translation_language', "en")
+        # Update state
+        USER_STATE[chat_id] = "READING_TRANSLATION"
         
-        # Send the full translated content
-        content = translated_article['content']
+        # Split content into sections for better navigation
+        sections = split_content_into_sections(translated_article['content'])
         
-        # Split into chunks if too long (Telegram has a 4096 char limit)
-        chunks = []
-        max_length = 3000  # Leave room for formatting
+        # Store sections in user data
+        user_data['translated_sections'] = sections
+        user_data['current_translated_section'] = 0
         
-        while content:
-            if len(content) <= max_length:
-                chunks.append(content)
-                break
-            
-            # Find a good breaking point
-            split_point = content[:max_length].rfind('\n\n')
-            if split_point == -1:
-                split_point = content[:max_length].rfind('\n')
-            if split_point == -1:
-                split_point = content[:max_length].rfind('. ')
-            if split_point == -1:
-                split_point = max_length
-            
-            chunks.append(content[:split_point+1])
-            content = content[split_point+1:]
-        
-        # Send each chunk
-        for i, chunk in enumerate(chunks):
-            if i == 0:
-                await self.bot.sendMessage(
-                    chat_id,
-                    f"*{translated_article['title']}*\n\n"
-                    f"Translated from {get_language_name(source_lang)} to {get_language_name(target_lang)}\n\n"
-                    f"{chunk}",
-                    parse_mode="Markdown"
-                )
-            else:
-                await self.bot.sendMessage(
-                    chat_id,
-                    chunk,
-                    parse_mode="Markdown"
-                )
-        
-        # Add back button
-        await self.bot.sendMessage(
-            chat_id,
-            "End of translated article.\n\n"
-            "_Note: This is a machine translation and may not be perfect._",
-            parse_mode="Markdown",
-            reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
-                InlineKeyboardButton(
-                    text="Back to Translation", 
-                    callback_data="back_to_translation"
-                )
-            ]])
-        )
+        # Display the first section
+        await self.display_translated_section(chat_id, message_id, translated_article, 0)
     
     async def handle_download_translation(self, chat_id, message_id):
         """Process download translation request"""
