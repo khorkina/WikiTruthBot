@@ -1,109 +1,236 @@
 """
-Handlers for Telegram bot commands and callbacks
+WikiSearch Telegram Bot
+
+A Telegram bot for searching, viewing, translating, and downloading
+Wikipedia articles in multiple languages.
 """
 
 import os
-import re
-import json
+import asyncio
 import logging
+import json
+import re
+import urllib.parse
+from datetime import datetime
+import tempfile
+import collections.abc
+
+# Monkey patch collections for Python 3.11+
+if not hasattr(collections, 'Hashable'):
+    collections.Hashable = collections.abc.Hashable
 
 import telepot
-from telepot.aio.delegate import per_chat_id
+import telepot.aio
+from telepot.aio.loop import MessageLoop
 from telepot.namedtuple import InlineKeyboardMarkup, InlineKeyboardButton
 
-from config import (
-    POPULAR_LANGUAGES,
-    DEFAULT_LANGUAGE,
-    LANGUAGE_NAMES,
-    SELECTING_LANGUAGE,
-    SEARCHING,
-    VIEWING_ARTICLE,
-    SELECTING_ACTION,
-    READING_ARTICLE,
-    TRANSLATING,
-    VIEWING_TRANSLATION,
-    CB_LANGUAGE,
-    CB_ARTICLE,
-    CB_ACTION,
-    CB_VIEW_LANG,
-    CB_TRANSLATE,
-    user_data_cache,
-    logger
-)
+# Load environment variables
+from dotenv import load_dotenv
+load_dotenv()
 
-from wiki_article import (
-    get_language_name,
-    search_wikipedia,
-    get_wikipedia_article,
-    get_article_in_other_language,
-    translate_article_content,
-    get_article_sharing_link
+# Configure logging
+logging.basicConfig(
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", 
+    level=logging.INFO
+)
+logger = logging.getLogger(__name__)
+
+# Bot Configuration
+TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
+if not TELEGRAM_BOT_TOKEN:
+    logger.error("No bot token provided. Set the TELEGRAM_BOT_TOKEN environment variable.")
+    exit(1)
+
+# Language settings
+LANGUAGE_NAMES = {
+    'en': 'English',
+    'es': 'Spanish',
+    'fr': 'French',
+    'de': 'German',
+    'it': 'Italian',
+    'pt': 'Portuguese',
+    'zh': 'Chinese',
+    'ja': 'Japanese',
+    'ru': 'Russian',
+    'ar': 'Arabic',
+    'hi': 'Hindi',
+    'ko': 'Korean',
+    'tr': 'Turkish',
+}
+
+POPULAR_LANGUAGES = {
+    'en': 'English',
+    'es': 'Spanish',
+    'fr': 'French', 
+    'de': 'German',
+    'ru': 'Russian',
+    'zh': 'Chinese',
+    'ar': 'Arabic',
+    'ja': 'Japanese'
+}
+
+DEFAULT_LANGUAGE = 'en'
+
+# Constants for callback query data prefixes
+CB_LANGUAGE = "lang"
+CB_ARTICLE = "article"
+CB_ACTION = "action"
+CB_VIEW_LANG = "view_lang"
+CB_TRANSLATE = "translate"
+
+# Global state storage
+USER_STATE = {}  # Store user states by chat_id
+USER_DATA = {}   # Store user data by chat_id
+
+# Import wiki utils functions
+from wiki_utils import (
+    get_wikipedia_search_results,
+    get_article_content,
+    get_available_languages,
+    get_article_in_language,
+    translate_text,
+    split_content_into_sections
 )
 
 from document_generator import create_document_from_article
 
-class BotHandler(telepot.aio.helper.ChatHandler):
-    """Handler for handling regular messages and commands"""
+# Utility functions
+def get_language_name(lang_code):
+    """Get language name from language code"""
+    return LANGUAGE_NAMES.get(lang_code, lang_code.upper())
+
+def search_wikipedia(query, language="en"):
+    """Search Wikipedia for articles in the specified language"""
+    return get_wikipedia_search_results(query, language)
+
+def get_wikipedia_article(title, language="en"):
+    """Get article content from Wikipedia"""
+    # Get article content
+    article = get_article_content(title, language)
     
-    def __init__(self, *args, **kwargs):
-        super(BotHandler, self).__init__(*args, **kwargs)
-        self.state = SELECTING_LANGUAGE
-        self.language = DEFAULT_LANGUAGE
+    if not article:
+        return None
     
-    async def on_chat_message(self, msg):
-        """Handle incoming chat messages and commands"""
-        content_type, chat_type, chat_id = telepot.glance(msg)
-        
-        if content_type != 'text':
-            await self.bot.sendMessage(
-                chat_id,
-                "I can only process text messages. Please send a text message."
-            )
-            return
-        
-        text = msg['text']
-        
-        # Handle commands
-        if text.startswith('/'):
-            command = text.split('@')[0].lower()  # Remove bot username from command
-            
-            if command == '/start':
-                await self.handle_start()
-            elif command == '/help':
-                await self.handle_help()
-            elif command == '/cancel':
-                await self.handle_cancel()
-            else:
-                await self.bot.sendMessage(
-                    chat_id,
-                    "Unknown command. Try /start, /help, or /cancel."
-                )
-            return
-        
-        # Handle regular text based on state
-        if self.state == SEARCHING:
-            await self.handle_search(text)
-        else:
-            # Default response for unexpected messages
-            await self.bot.sendMessage(
-                chat_id,
-                "I'm not sure what you mean. Use /start to begin searching for Wikipedia articles."
-            )
+    # Get available languages for this article
+    available_languages = get_available_languages(title, language)
     
-    async def handle_start(self):
-        """Start the conversation and show language selection"""
-        chat_id = self.chat_id
+    # Add available languages to article data
+    article['available_languages'] = available_languages
+    
+    return article
+
+def get_article_in_other_language(title, target_lang):
+    """Get the article in another available language"""
+    # Get article in the target language
+    article = get_article_in_language(title, target_lang)
+    
+    if not article:
+        return None
+    
+    # Get available languages for this article
+    available_languages = get_available_languages(title, target_lang)
+    
+    # Add available languages to article data
+    article['available_languages'] = available_languages
+    
+    return article
+
+def translate_article_content(article, from_lang, to_lang):
+    """Translate article content from one language to another"""
+    if not article:
+        return None
+    
+    try:
+        # Translate title, summary, and content
+        translated_title = translate_text(article['title'], to_lang, from_lang)
+        translated_summary = translate_text(article['summary'], to_lang, from_lang)
+        translated_content = translate_text(article['content'], to_lang, from_lang)
         
-        # Clear any existing user data
-        if chat_id in user_data_cache:
-            del user_data_cache[chat_id]
-        
-        # Initialize new user data
-        user_data_cache[chat_id] = {
-            "language": DEFAULT_LANGUAGE
+        # Create translated article object
+        translated_article = {
+            'title': translated_title,
+            'summary': translated_summary,
+            'content': translated_content,
+            'url': article['url'],  # Keep original URL
+            'available_languages': article.get('available_languages', {})  # Keep original language options
         }
         
-        # Create keyboard with language options
+        return translated_article
+    except Exception as e:
+        logger.error(f"Translation error: {str(e)}")
+        return None
+
+def get_article_sharing_link(title, lang):
+    """Generate a Wikipedia sharing link for the article"""
+    try:
+        # Create Wikipedia URL
+        encoded_title = urllib.parse.quote(title.replace(' ', '_'))
+        article_url = f"https://{lang}.wikipedia.org/wiki/{encoded_title}"
+        
+        return article_url
+    except Exception as e:
+        logger.error(f"Error generating article link: {str(e)}")
+        return None
+
+class WikiBot:
+    def __init__(self, token):
+        self.token = token
+        self.bot = telepot.aio.Bot(token)
+        self._answerer = telepot.aio.helper.Answerer(self.bot)
+    
+    async def handle_message(self, msg):
+        """Handle incoming messages"""
+        content_type, chat_type, chat_id = telepot.glance(msg)
+        logger.info(f"Message from {chat_id}: {content_type}")
+        
+        # Initialize user state if needed
+        if chat_id not in USER_STATE:
+            USER_STATE[chat_id] = "START"
+        
+        # Initialize user data if needed
+        if chat_id not in USER_DATA:
+            USER_DATA[chat_id] = {"language": DEFAULT_LANGUAGE}
+            
+        # Handle different message types
+        if content_type == 'text':
+            text = msg['text']
+            
+            # Handle commands
+            if text.startswith('/'):
+                command = text.split('@')[0].lower()
+                await self.handle_command(command, chat_id)
+            else:
+                # Handle regular messages based on user state
+                await self.handle_text_message(text, chat_id)
+        else:
+            await self.bot.sendMessage(
+                chat_id, 
+                "I can only process text messages. Please send a text message."
+            )
+    
+    async def handle_command(self, command, chat_id):
+        """Handle bot commands"""
+        if command == '/start':
+            await self.handle_start(chat_id)
+        elif command == '/help':
+            await self.handle_help(chat_id)
+        elif command == '/cancel':
+            await self.handle_cancel(chat_id)
+        else:
+            await self.bot.sendMessage(
+                chat_id,
+                "Unknown command. Try /start, /help, or /cancel."
+            )
+    
+    async def handle_start(self, chat_id):
+        """Handle /start command"""
+        # Reset user state
+        USER_STATE[chat_id] = "SELECTING_LANGUAGE"
+        
+        # Reset user data
+        USER_DATA[chat_id] = {"language": DEFAULT_LANGUAGE}
+        
+        # Show language selection keyboard
         keyboard = []
         row = []
         
@@ -127,13 +254,9 @@ class BotHandler(telepot.aio.helper.ChatHandler):
             "Please select a language for your search:",
             reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard)
         )
-        
-        self.state = SELECTING_LANGUAGE
     
-    async def handle_help(self):
-        """Display help information"""
-        chat_id = self.chat_id
-        
+    async def handle_help(self, chat_id):
+        """Handle /help command"""
         help_text = (
             "📖 *WikiSearch Bot Help*\n\n"
             "*Commands:*\n"
@@ -155,30 +278,42 @@ class BotHandler(telepot.aio.helper.ChatHandler):
             parse_mode="Markdown"
         )
     
-    async def handle_cancel(self):
-        """Cancel the current operation"""
-        chat_id = self.chat_id
+    async def handle_cancel(self, chat_id):
+        """Handle /cancel command"""
+        USER_STATE[chat_id] = "START"
         
         await self.bot.sendMessage(
             chat_id,
             "Operation cancelled. Type /start to begin a new search."
         )
-        
-        self.state = SELECTING_LANGUAGE
     
-    async def handle_search(self, query):
-        """Search Wikipedia for the given query"""
-        chat_id = self.chat_id
+    async def handle_text_message(self, text, chat_id):
+        """Handle non-command text messages based on user state"""
+        state = USER_STATE.get(chat_id, "START")
         
-        # Get current language for the user
-        if chat_id not in user_data_cache:
-            user_data_cache[chat_id] = {}
+        if state == "START":
+            # If no active session, suggest starting
+            await self.bot.sendMessage(
+                chat_id,
+                "Please use /start to begin searching for Wikipedia articles."
+            )
         
-        user_data = user_data_cache[chat_id]
-        language = user_data.get('language', DEFAULT_LANGUAGE)
+        elif state == "SELECTING_LANGUAGE":
+            # Should not reach here as this is handled by callback
+            await self.bot.sendMessage(
+                chat_id,
+                "Please select a language from the options."
+            )
         
-        # Save the query
-        user_data['search_query'] = query
+        elif state == "SEARCHING":
+            # Handle search query
+            await self.handle_search(text, chat_id)
+    
+    async def handle_search(self, query, chat_id):
+        """Process a search query"""
+        # Store the query
+        USER_DATA[chat_id]['search_query'] = query
+        language = USER_DATA[chat_id].get('language', DEFAULT_LANGUAGE)
         
         # Show searching message
         wait_msg = await self.bot.sendMessage(
@@ -189,11 +324,14 @@ class BotHandler(telepot.aio.helper.ChatHandler):
         # Search Wikipedia
         search_results = search_wikipedia(query, language)
         
+        # Update state
+        USER_STATE[chat_id] = "VIEWING_RESULTS"
+        
         # Process search results
         if search_results:
             # Create keyboard with search results
             keyboard = []
-            for title in search_results[:8]:  # Limit to 8 results to keep menu size reasonable
+            for title in search_results[:8]:  # Limit to 8 results
                 keyboard.append([
                     InlineKeyboardButton(
                         text=title, 
@@ -237,79 +375,73 @@ class BotHandler(telepot.aio.helper.ChatHandler):
                 f"Would you like to try a different search or change the language?",
                 reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard)
             )
-        
-        self.state = VIEWING_ARTICLE
-
-
-class CallbackQueryHandler(telepot.aio.helper.CallbackQueryOriginHandler):
-    """Handler for handling callback queries from inline buttons"""
     
-    def __init__(self, *args, **kwargs):
-        super(CallbackQueryHandler, self).__init__(*args, **kwargs)
-        self.language = DEFAULT_LANGUAGE
-    
-    async def on_callback_query(self, msg):
+    async def handle_callback_query(self, msg):
         """Handle callback queries from inline keyboards"""
         query_id, from_id, query_data = telepot.glance(msg, flavor='callback_query')
+        chat_id = msg['message']['chat']['id']
+        message_id = msg['message']['message_id']
         
-        # Always acknowledge the callback query to stop the loading indicator
+        logger.info(f"Callback query from {chat_id}: {query_data}")
+        
+        # Initialize user state & data if needed
+        if chat_id not in USER_STATE:
+            USER_STATE[chat_id] = "START"
+        if chat_id not in USER_DATA:
+            USER_DATA[chat_id] = {"language": DEFAULT_LANGUAGE}
+        
+        # Always acknowledge the callback to stop loading indicator
         await self.bot.answerCallbackQuery(query_id)
         
         # Handle language selection
         if query_data.startswith(f"{CB_LANGUAGE}:"):
-            await self.handle_language_selection(msg, query_data)
+            await self.handle_language_selection(chat_id, message_id, query_data)
         
         # Handle article selection
         elif query_data.startswith(f"{CB_ARTICLE}:"):
-            await self.handle_article_selection(msg, query_data)
+            await self.handle_article_selection(chat_id, message_id, query_data)
         
         # Handle action selection
         elif query_data.startswith(f"{CB_ACTION}:"):
-            await self.handle_action_selection(msg, query_data)
+            await self.handle_action_selection(chat_id, message_id, query_data)
         
         # Handle language view selection
         elif query_data.startswith(f"{CB_VIEW_LANG}:"):
-            await self.handle_view_language_selection(msg, query_data)
+            await self.handle_view_language_selection(chat_id, message_id, query_data)
         
         # Handle translation language selection
         elif query_data.startswith(f"{CB_TRANSLATE}:"):
-            await self.handle_translate_selection(msg, query_data)
+            await self.handle_translate_selection(chat_id, message_id, query_data)
         
         # Handle navigation actions
         elif query_data == "new_search":
-            await self.handle_new_search(msg)
+            await self.handle_new_search(chat_id, message_id)
         
         elif query_data == "try_again":
-            await self.handle_try_again(msg)
+            await self.handle_try_again(chat_id, message_id)
         
         elif query_data == "back_to_article":
-            await self.handle_back_to_article(msg)
+            await self.handle_back_to_article(chat_id, message_id)
         
         elif query_data == "read_translation":
-            await self.handle_read_translation(msg)
+            await self.handle_read_translation(chat_id, message_id)
         
         elif query_data == "download_translation":
-            await self.handle_download_translation(msg)
+            await self.handle_download_translation(chat_id, message_id)
         
         elif query_data == "back_to_translation":
-            await self.handle_back_to_translation(msg)
+            await self.handle_back_to_translation(chat_id, message_id)
     
-    async def handle_language_selection(self, msg, query_data):
-        """Handle language selection callback"""
-        chat_id = msg['message']['chat']['id']
-        message_id = msg['message']['message_id']
-        
-        # Extract language code from callback data
+    async def handle_language_selection(self, chat_id, message_id, query_data):
+        """Process language selection"""
+        # Extract language code
         lang_code = query_data.split(':', 1)[1]
         
-        # Save the selected language
-        self.language = lang_code
+        # Update user data with selected language
+        USER_DATA[chat_id]['language'] = lang_code
         
-        # Update user data cache
-        if chat_id not in user_data_cache:
-            user_data_cache[chat_id] = {}
-        user_data_cache[chat_id]['language'] = lang_code
-        user_data_cache[chat_id]['state'] = SEARCHING  # Store state in cache
+        # Update state
+        USER_STATE[chat_id] = "SEARCHING"
         
         # Prompt for search term
         await self.bot.editMessageText(
@@ -318,19 +450,13 @@ class CallbackQueryHandler(telepot.aio.helper.CallbackQueryOriginHandler):
             f"Please enter a search term to find Wikipedia articles:"
         )
     
-    async def handle_article_selection(self, msg, query_data):
-        """Handle article selection callback"""
-        chat_id = msg['message']['chat']['id']
-        message_id = msg['message']['message_id']
-        
-        # Extract article title from callback data
+    async def handle_article_selection(self, chat_id, message_id, query_data):
+        """Process article selection"""
+        # Extract article title
         title = query_data.split(':', 1)[1]
         
         # Get user data
-        if chat_id not in user_data_cache:
-            user_data_cache[chat_id] = {}
-        user_data = user_data_cache[chat_id]
-        
+        user_data = USER_DATA[chat_id]
         language = user_data.get('language', DEFAULT_LANGUAGE)
         
         # Fetch article content
@@ -355,8 +481,11 @@ class CallbackQueryHandler(telepot.aio.helper.CallbackQueryOriginHandler):
             )
             return
         
-        # Cache the article data
-        user_data['current_article'] = article
+        # Store article data
+        USER_DATA[chat_id]['current_article'] = article
+        
+        # Update state
+        USER_STATE[chat_id] = "VIEWING_ARTICLE"
         
         # Get available languages for the article
         available_languages = article.get('available_languages', {})
@@ -430,30 +559,14 @@ class CallbackQueryHandler(telepot.aio.helper.CallbackQueryOriginHandler):
             parse_mode="Markdown",
             reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard)
         )
-        
-        # Update the state for the chat handler
-        for handler in self.bot._router._handlers:
-            if isinstance(handler, BotHandler) and handler.chat_id == chat_id:
-                handler.state = SELECTING_ACTION
-                break
     
-    async def handle_action_selection(self, msg, query_data):
-        """Handle action selection for an article"""
-        chat_id = msg['message']['chat']['id']
-        message_id = msg['message']['message_id']
-        
-        # Extract action from callback data
+    async def handle_action_selection(self, chat_id, message_id, query_data):
+        """Process action selection for an article"""
+        # Extract action
         action = query_data.split(':', 1)[1]
         
         # Get user data
-        if chat_id not in user_data_cache:
-            await self.bot.sendMessage(
-                chat_id,
-                "Session expired. Please start a new search with /start."
-            )
-            return
-        
-        user_data = user_data_cache[chat_id]
+        user_data = USER_DATA[chat_id]
         article = user_data.get('current_article')
         
         if not article:
@@ -465,6 +578,9 @@ class CallbackQueryHandler(telepot.aio.helper.CallbackQueryOriginHandler):
         
         # Process the selected action
         if action == "read":
+            # Update state
+            USER_STATE[chat_id] = "READING_ARTICLE"
+            
             # Send the full article content
             content = article['content']
             
@@ -525,7 +641,7 @@ class CallbackQueryHandler(telepot.aio.helper.CallbackQueryOriginHandler):
             if not available_languages:
                 await self.bot.editMessageText(
                     (chat_id, message_id),
-                    f"This article is only available in {get_language_name(self.language)}.",
+                    f"This article is only available in {get_language_name(user_data.get('language', DEFAULT_LANGUAGE))}.",
                     reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
                         InlineKeyboardButton(
                             text="Back to Article", 
@@ -538,7 +654,7 @@ class CallbackQueryHandler(telepot.aio.helper.CallbackQueryOriginHandler):
             # Create keyboard with available languages
             keyboard = []
             for lang_code, lang_title in available_languages.items():
-                if lang_code != self.language:  # Skip current language
+                if lang_code != user_data.get('language', DEFAULT_LANGUAGE):  # Skip current language
                     keyboard.append([
                         InlineKeyboardButton(
                             text=f"{get_language_name(lang_code)} - {lang_title}", 
@@ -681,23 +797,13 @@ class CallbackQueryHandler(telepot.aio.helper.CallbackQueryOriginHandler):
                 ]])
             )
     
-    async def handle_view_language_selection(self, msg, query_data):
-        """Handle viewing article in another language"""
-        chat_id = msg['message']['chat']['id']
-        message_id = msg['message']['message_id']
-        
-        # Extract target language from callback data
+    async def handle_view_language_selection(self, chat_id, message_id, query_data):
+        """Process viewing article in another language"""
+        # Extract target language
         target_lang = query_data.split(':', 1)[1]
         
         # Get user data
-        if chat_id not in user_data_cache:
-            await self.bot.sendMessage(
-                chat_id,
-                "Session expired. Please start a new search with /start."
-            )
-            return
-        
-        user_data = user_data_cache[chat_id]
+        user_data = USER_DATA[chat_id]
         article = user_data.get('current_article')
         
         if not article:
@@ -752,7 +858,6 @@ class CallbackQueryHandler(telepot.aio.helper.CallbackQueryOriginHandler):
         # Update user data
         user_data['current_article'] = target_article
         user_data['language'] = target_lang
-        self.language = target_lang
         
         # Create keyboard for article actions
         keyboard = []
@@ -824,23 +929,13 @@ class CallbackQueryHandler(telepot.aio.helper.CallbackQueryOriginHandler):
             reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard)
         )
     
-    async def handle_translate_selection(self, msg, query_data):
-        """Handle translation of article to selected language"""
-        chat_id = msg['message']['chat']['id']
-        message_id = msg['message']['message_id']
-        
-        # Extract target language from callback data
+    async def handle_translate_selection(self, chat_id, message_id, query_data):
+        """Process translating article to selected language"""
+        # Extract target language
         target_lang = query_data.split(':', 1)[1]
         
         # Get user data
-        if chat_id not in user_data_cache:
-            await self.bot.sendMessage(
-                chat_id,
-                "Session expired. Please start a new search with /start."
-            )
-            return
-        
-        user_data = user_data_cache[chat_id]
+        user_data = USER_DATA[chat_id]
         article = user_data.get('current_article')
         
         if not article:
@@ -852,6 +947,9 @@ class CallbackQueryHandler(telepot.aio.helper.CallbackQueryOriginHandler):
         
         # Get source language
         source_lang = user_data.get('language', DEFAULT_LANGUAGE)
+        
+        # Update state
+        USER_STATE[chat_id] = "TRANSLATING"
         
         # Show loading message
         await self.bot.editMessageText(
@@ -880,6 +978,9 @@ class CallbackQueryHandler(telepot.aio.helper.CallbackQueryOriginHandler):
             # Store the translated article
             user_data['translated_article'] = translated_article
             user_data['translation_language'] = target_lang
+            
+            # Update state
+            USER_STATE[chat_id] = "VIEWING_TRANSLATION"
             
             # Format message with translated summary
             summary = translated_article['summary']
@@ -934,16 +1035,11 @@ class CallbackQueryHandler(telepot.aio.helper.CallbackQueryOriginHandler):
                 ]])
             )
     
-    async def handle_new_search(self, msg):
-        """Handle new search button click"""
-        chat_id = msg['message']['chat']['id']
+    async def handle_new_search(self, chat_id, message_id):
+        """Process new search request"""
+        # Update state
+        USER_STATE[chat_id] = "SELECTING_LANGUAGE"
         
-        # Get current language
-        if chat_id in user_data_cache:
-            language = user_data_cache[chat_id].get('language', DEFAULT_LANGUAGE)
-        else:
-            language = DEFAULT_LANGUAGE
-            
         # Create keyboard with language options
         keyboard = []
         row = []
@@ -963,7 +1059,7 @@ class CallbackQueryHandler(telepot.aio.helper.CallbackQueryOriginHandler):
         # Update the message
         try:
             await self.bot.editMessageText(
-                (chat_id, msg['message']['message_id']),
+                (chat_id, message_id),
                 "🌍 Start a new search!\n\n"
                 "Please select a language for your search:",
                 reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard)
@@ -976,28 +1072,19 @@ class CallbackQueryHandler(telepot.aio.helper.CallbackQueryOriginHandler):
                 "Please select a language for your search:",
                 reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard)
             )
+    
+    async def handle_try_again(self, chat_id, message_id):
+        """Process try again request"""
+        # Get current language
+        language = USER_DATA[chat_id].get('language', DEFAULT_LANGUAGE)
         
-        # Update the state for the chat handler
-        for handler in self.bot._router._handlers:
-            if isinstance(handler, BotHandler) and handler.chat_id == chat_id:
-                handler.state = SELECTING_LANGUAGE
-                break
-                
-    async def handle_try_again(self, msg):
-        """Handle try again button click"""
-        chat_id = msg['message']['chat']['id']
-        
-        # Get user data
-        if chat_id not in user_data_cache:
-            user_data_cache[chat_id] = {}
-            
-        user_data = user_data_cache[chat_id]
-        language = user_data.get('language', DEFAULT_LANGUAGE)
+        # Update state
+        USER_STATE[chat_id] = "SEARCHING"
         
         # Prompt for a new search
         try:
             await self.bot.editMessageText(
-                (chat_id, msg['message']['message_id']),
+                (chat_id, message_id),
                 f"Please enter a new search query (language: {get_language_name(language)}):"
             )
         except telepot.exception.TelegramError:
@@ -1006,26 +1093,11 @@ class CallbackQueryHandler(telepot.aio.helper.CallbackQueryOriginHandler):
                 chat_id,
                 f"Please enter a new search query (language: {get_language_name(language)}):"
             )
-        
-        # Update the state for the chat handler
-        for handler in self.bot._router._handlers:
-            if isinstance(handler, BotHandler) and handler.chat_id == chat_id:
-                handler.state = SEARCHING
-                break
-                
-    async def handle_back_to_article(self, msg):
-        """Navigate back to article summary view"""
-        chat_id = msg['message']['chat']['id']
-        
+    
+    async def handle_back_to_article(self, chat_id, message_id):
+        """Process back to article request"""
         # Get user data
-        if chat_id not in user_data_cache:
-            await self.bot.sendMessage(
-                chat_id,
-                "Session expired. Please start a new search with /start."
-            )
-            return
-            
-        user_data = user_data_cache[chat_id]
+        user_data = USER_DATA[chat_id]
         article = user_data.get('current_article')
         
         if not article:
@@ -1034,12 +1106,18 @@ class CallbackQueryHandler(telepot.aio.helper.CallbackQueryOriginHandler):
                 "Article data not found. Please start a new search with /start."
             )
             return
-            
+        
+        # Update state
+        USER_STATE[chat_id] = "VIEWING_ARTICLE"
+        
         # Get language
         language = user_data.get('language', DEFAULT_LANGUAGE)
         
         # Create keyboard for article actions
         keyboard = []
+        
+        # Get available languages
+        available_languages = article.get('available_languages', {})
         
         # Read full article button
         keyboard.append([
@@ -1050,7 +1128,6 @@ class CallbackQueryHandler(telepot.aio.helper.CallbackQueryOriginHandler):
         ])
         
         # Other language versions button
-        available_languages = article.get('available_languages', {})
         if available_languages and len(available_languages) > 1:
             keyboard.append([
                 InlineKeyboardButton(
@@ -1104,7 +1181,7 @@ class CallbackQueryHandler(telepot.aio.helper.CallbackQueryOriginHandler):
         
         try:
             await self.bot.editMessageText(
-                (chat_id, msg['message']['message_id']),
+                (chat_id, message_id),
                 message,
                 parse_mode="Markdown",
                 reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard)
@@ -1118,19 +1195,10 @@ class CallbackQueryHandler(telepot.aio.helper.CallbackQueryOriginHandler):
                 reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard)
             )
     
-    async def handle_read_translation(self, msg):
-        """Display the full translated article content"""
-        chat_id = msg['message']['chat']['id']
-        
+    async def handle_read_translation(self, chat_id, message_id):
+        """Process read translation request"""
         # Get user data
-        if chat_id not in user_data_cache:
-            await self.bot.sendMessage(
-                chat_id,
-                "Session expired. Please start a new search with /start."
-            )
-            return
-            
-        user_data = user_data_cache[chat_id]
+        user_data = USER_DATA[chat_id]
         translated_article = user_data.get('translated_article')
         
         if not translated_article:
@@ -1145,7 +1213,7 @@ class CallbackQueryHandler(telepot.aio.helper.CallbackQueryOriginHandler):
                 ]])
             )
             return
-            
+        
         # Get language info
         source_lang = user_data.get('language', DEFAULT_LANGUAGE)
         target_lang = user_data.get('translation_language', "en")
@@ -1205,20 +1273,10 @@ class CallbackQueryHandler(telepot.aio.helper.CallbackQueryOriginHandler):
             ]])
         )
     
-    async def handle_download_translation(self, msg):
-        """Generate and send a document with the translated article"""
-        chat_id = msg['message']['chat']['id']
-        message_id = msg['message']['message_id']
-        
+    async def handle_download_translation(self, chat_id, message_id):
+        """Process download translation request"""
         # Get user data
-        if chat_id not in user_data_cache:
-            await self.bot.sendMessage(
-                chat_id,
-                "Session expired. Please start a new search with /start."
-            )
-            return
-            
-        user_data = user_data_cache[chat_id]
+        user_data = USER_DATA[chat_id]
         translated_article = user_data.get('translated_article')
         
         if not translated_article:
@@ -1233,7 +1291,7 @@ class CallbackQueryHandler(telepot.aio.helper.CallbackQueryOriginHandler):
                 ]])
             )
             return
-            
+        
         # Get language info
         target_lang = user_data.get('translation_language', "en")
         
@@ -1297,19 +1355,10 @@ class CallbackQueryHandler(telepot.aio.helper.CallbackQueryOriginHandler):
                 ]])
             )
     
-    async def handle_back_to_translation(self, msg):
-        """Return to the translation summary view"""
-        chat_id = msg['message']['chat']['id']
-        
+    async def handle_back_to_translation(self, chat_id, message_id):
+        """Process back to translation request"""
         # Get user data
-        if chat_id not in user_data_cache:
-            await self.bot.sendMessage(
-                chat_id,
-                "Session expired. Please start a new search with /start."
-            )
-            return
-            
-        user_data = user_data_cache[chat_id]
+        user_data = USER_DATA[chat_id]
         translated_article = user_data.get('translated_article')
         
         if not translated_article:
@@ -1324,7 +1373,10 @@ class CallbackQueryHandler(telepot.aio.helper.CallbackQueryOriginHandler):
                 ]])
             )
             return
-            
+        
+        # Update state
+        USER_STATE[chat_id] = "VIEWING_TRANSLATION"
+        
         # Get language info
         source_lang = user_data.get('language', DEFAULT_LANGUAGE)
         target_lang = user_data.get('translation_language', "en")
@@ -1363,7 +1415,7 @@ class CallbackQueryHandler(telepot.aio.helper.CallbackQueryOriginHandler):
         
         try:
             await self.bot.editMessageText(
-                (chat_id, msg['message']['message_id']),
+                (chat_id, message_id),
                 message,
                 parse_mode="Markdown",
                 reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard)
@@ -1376,3 +1428,34 @@ class CallbackQueryHandler(telepot.aio.helper.CallbackQueryOriginHandler):
                 parse_mode="Markdown",
                 reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard)
             )
+
+def main():
+    """Start the WikiSearch Telegram bot"""
+    if not TELEGRAM_BOT_TOKEN:
+        logger.error("No bot token provided. Set the TELEGRAM_BOT_TOKEN environment variable.")
+        exit(1)
+    
+    # Create bot instance
+    bot = WikiBot(TELEGRAM_BOT_TOKEN)
+    
+    # Set up message handlers
+    loop = asyncio.get_event_loop()
+    
+    # Handle incoming messages
+    loop.create_task(MessageLoop(
+        bot.bot, 
+        {'chat': bot.handle_message, 'callback_query': bot.handle_callback_query}
+    ).run_forever())
+    
+    logger.info("WikiSearch Telegram Bot is running...")
+    
+    # Keep the program running
+    try:
+        loop.run_forever()
+    except KeyboardInterrupt:
+        logger.info("Bot stopped by user")
+    finally:
+        loop.close()
+
+if __name__ == "__main__":
+    main()
