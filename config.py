@@ -8,7 +8,17 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # Bot token from environment variable
+# Try both direct environment variables and dotenv file
 TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
+
+# If token is not found, try to load from .env file
+if not TELEGRAM_BOT_TOKEN:
+    try:
+        from dotenv import load_dotenv
+        load_dotenv()
+        TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
+    except ImportError:
+        logger.warning("python-dotenv not installed, could not load .env file")
 
 # Language name mapping (from utils.py)
 LANGUAGE_NAMES = {

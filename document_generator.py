@@ -3,10 +3,14 @@ Module for generating document files from Wikipedia articles
 """
 
 import os
+import re
+import tempfile
 import logging
 from docx import Document
 from docx.shared import Pt, Inches
 from docx.enum.text import WD_ALIGN_PARAGRAPH
+
+from wiki_utils import split_content_into_sections
 
 def create_document_from_article(article, language):
     """
@@ -23,63 +27,58 @@ def create_document_from_article(article, language):
         return None
     
     try:
-        # Create a new Document
+        # Create a new document
         doc = Document()
         
         # Set document properties
         doc.core_properties.title = article['title']
-        doc.core_properties.subject = f"Wikipedia article in {language}"
+        doc.core_properties.language = language
         
         # Add title
-        title = doc.add_heading(article['title'], level=0)
+        title = doc.add_heading(article['title'], 0)
         title.alignment = WD_ALIGN_PARAGRAPH.CENTER
         
-        # Add language and source info
-        source_paragraph = doc.add_paragraph()
-        source_paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
-        source_run = source_paragraph.add_run(f"Source: Wikipedia ({language})")
-        source_run.italic = True
-        
-        # Add URL reference
-        url_paragraph = doc.add_paragraph()
-        url_paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
-        url_run = url_paragraph.add_run(article['url'])
-        url_run.italic = True
-        
-        # Add horizontal line
-        doc.add_paragraph('_' * 50)
+        # Add source information
+        source_para = doc.add_paragraph()
+        source_para.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        source_para.add_run(f"Source: {article['url']}").italic = True
         
         # Add summary section
-        doc.add_heading('Summary', level=1)
+        doc.add_heading('Summary', 1)
         doc.add_paragraph(article['summary'])
         
-        # Add full content
-        doc.add_heading('Full Content', level=1)
+        # Add a page break before the full content
+        doc.add_page_break()
         
-        # Add sections if available
-        if 'sections' in article and article['sections']:
-            for section in article['sections']:
-                if section.get('title'):
-                    # Add section heading (level based on the section's level)
-                    level = min(section.get('level', 0) + 2, 9)  # Limit to valid levels (Word only supports up to 9)
-                    doc.add_heading(section['title'], level=level)
-                
-                # Add section content
-                doc.add_paragraph(section['content'])
-        else:
-            # If no sections, just add the full content
-            doc.add_paragraph(article['content'])
+        # Split content into sections for better formatting
+        sections = split_content_into_sections(article['content'])
         
-        # Create a safe filename
-        safe_title = "".join([c if c.isalnum() or c in [' ', '-', '_'] else '_' for c in article['title']])
-        filename = f"{safe_title}_{language}.docx"
+        # Process each section
+        for section in sections:
+            if section['title']:
+                # Calculate heading level (1-3)
+                level = min(section['level'] - 1, 2) if section['level'] > 0 else 1
+                doc.add_heading(section['title'], level)
+            
+            # Add section content
+            content = section['content']
+            
+            # Split into paragraphs
+            paragraphs = content.split('\n\n')
+            for para_text in paragraphs:
+                if para_text.strip():
+                    doc.add_paragraph(para_text.strip())
         
-        # Save the document to a temporary file
-        file_path = os.path.join(os.getcwd(), filename)
-        doc.save(file_path)
+        # Generate a temporary file for the document
+        temp_file = tempfile.NamedTemporaryFile(delete=False, suffix='.docx')
+        doc_path = temp_file.name
+        temp_file.close()
         
-        return file_path
-    
+        # Save the document
+        doc.save(doc_path)
+        
+        return doc_path
+        
     except Exception as e:
-        logging.error(f"Error creating document: {str(e)}")
+        logging.error(f"Error generating document: {str(e)}")
         return None

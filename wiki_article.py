@@ -68,7 +68,7 @@ def get_article_in_other_language(title, target_lang):
     Returns:
         dict: Article in target language or None if not available
     """
-    # Get article in the target language
+    # Get article in the target language (using title already in target language)
     article = get_article_in_language(title, target_lang)
     
     if not article:
