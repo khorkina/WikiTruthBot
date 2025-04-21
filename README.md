@@ -19,11 +19,13 @@ A Python Telegram bot that allows users to search, view, translate, and download
 
 ## Installation
 
+### Local Installation
+
 1. Clone this repository or download the source code
-2. Install the required dependencies:
+2. Install the required dependencies listed in `dependencies.txt`:
 
 ```bash
-pip install -r requirements.txt
+pip install aiohttp==3.7.4.post0 async-timeout==3.0.1 docx==0.2.4 python-docx==0.8.11 python-dotenv==1.0.0 requests==2.28.2 telepot==12.7
 ```
 
 3. Create a `.env` file in the root directory with your Telegram bot token:
@@ -31,6 +33,23 @@ pip install -r requirements.txt
 ```
 TELEGRAM_BOT_TOKEN=your_telegram_bot_token
 ```
+
+### Quick Start Guide
+
+1. Create a new bot with [@BotFather](https://t.me/BotFather) on Telegram
+   - Send `/newbot` to BotFather
+   - Follow the prompts to set a name and username
+   - Copy the API token provided
+
+2. Set up the bot:
+   - Add the token to your `.env` file
+   - Run the bot using `python bot.py`
+   - Start interacting with your bot on Telegram
+
+3. If using Replit:
+   - Set your token as a secret named `TELEGRAM_BOT_TOKEN`
+   - Start the "telegram_bot" workflow
+   - Your bot will remain active as long as the Replit is running
 
 ## Running the Bot
 
@@ -95,6 +114,29 @@ Start the `telegram_bot` workflow:
 ## License
 
 This project is open source and available under the MIT License.
+
+## Key Features In Detail
+
+### Section Navigation
+Articles are automatically split into logical sections based on headings. This provides:
+- Better readability with manageable content chunks
+- Previous/Next navigation between sections
+- Direct access to section translation
+- Clear indication of your current position in the article
+
+### Individual Section Translation
+Each section can be translated independently:
+- Translate only the parts you're interested in
+- Compare original and translated content side by side
+- Choose from multiple target languages
+- Faster processing than full article translation
+
+### Document Download
+Articles can be downloaded as Word documents:
+- Preserves formatting and headings
+- Includes article metadata
+- Works for both original and translated articles
+- Offline reading without Telegram
 
 ## Acknowledgments
 
