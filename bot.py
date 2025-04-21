@@ -9,6 +9,12 @@ import os
 import logging
 import time
 import asyncio
+import collections.abc
+
+# Patch for Python 3.11 compatibility
+if not hasattr(collections, 'Hashable'):
+    collections.Hashable = collections.abc.Hashable
+
 import telepot
 from telepot.aio.loop import MessageLoop
 from telepot.aio.delegate import pave_event_space, per_chat_id, create_open, per_callback_query_origin
