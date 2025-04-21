@@ -376,6 +376,96 @@ class WikiBot:
                 reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard)
             )
     
+    async def display_article_section(self, chat_id, message_id, article, section_index):
+        """Display a specific section of an article with navigation buttons"""
+        user_data = USER_DATA[chat_id]
+        sections = user_data.get('article_sections', [])
+        
+        if not sections or section_index >= len(sections) or section_index < 0:
+            # Invalid section index, go back to article
+            await self.handle_back_to_article(chat_id, message_id)
+            return
+        
+        # Get the current section
+        section = sections[section_index]
+        
+        # Create section navigation buttons
+        keyboard = []
+        nav_row = []
+        
+        # Previous section button (if not first section)
+        if section_index > 0:
+            nav_row.append(InlineKeyboardButton(
+                text="◀️ Previous", 
+                callback_data=f"section:{section_index-1}"
+            ))
+        
+        # Next section button (if not last section)
+        if section_index < len(sections) - 1:
+            nav_row.append(InlineKeyboardButton(
+                text="Next ▶️", 
+                callback_data=f"section:{section_index+1}"
+            ))
+            
+        if nav_row:
+            keyboard.append(nav_row)
+            
+        # Translate section button
+        language = user_data.get('language', DEFAULT_LANGUAGE)
+        keyboard.append([
+            InlineKeyboardButton(
+                text="🔄 Translate Section", 
+                callback_data=f"translate_section:{section_index}"
+            )
+        ])
+        
+        # Back button
+        keyboard.append([
+            InlineKeyboardButton(
+                text="Back to Article", 
+                callback_data="back_to_article"
+            )
+        ])
+        
+        # Format section content
+        if section['title']:
+            section_title = f"*{section['title']}*\n\n"
+        else:
+            if section_index == 0:
+                section_title = f"*{article['title']}*\n\n"
+            else:
+                section_title = ""
+                
+        section_content = section['content']
+                
+        # Format the entire message
+        message = (
+            f"{section_title}{section_content}\n\n"
+            f"_Section {section_index + 1} of {len(sections)}_"
+        )
+        
+        # Make sure we don't exceed message limits
+        if len(message) > 4000:
+            message = message[:3997] + "..."
+            
+        try:
+            # Try to edit the existing message
+            await self.bot.editMessageText(
+                (chat_id, message_id),
+                message,
+                parse_mode="Markdown",
+                reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard)
+            )
+        except Exception as e:
+            # If there's an error (e.g., message too old), send a new message
+            logger.error(f"Error editing message: {str(e)}")
+            await self.bot.sendMessage(
+                chat_id,
+                message,
+                parse_mode="Markdown",
+                reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard)
+            )
+
     async def handle_callback_query(self, msg):
         """Handle callback queries from inline keyboards"""
         query_id, from_id, query_data = telepot.glance(msg, flavor='callback_query')
@@ -412,6 +502,17 @@ class WikiBot:
         # Handle translation language selection
         elif query_data.startswith(f"{CB_TRANSLATE}:"):
             await self.handle_translate_selection(chat_id, message_id, query_data)
+            
+        # Handle article section navigation
+        elif query_data.startswith("section:"):
+            section_index = int(query_data.split(":", 1)[1])
+            article = USER_DATA[chat_id].get('current_article')
+            if article:
+                await self.display_article_section(chat_id, message_id, article, section_index)
+                
+        # Handle section translation
+        elif query_data.startswith("translate_section:"):
+            await self.handle_translate_section(chat_id, message_id, query_data)
         
         # Handle navigation actions
         elif query_data == "new_search":
@@ -1310,6 +1411,240 @@ class WikiBot:
                 ]])
             )
     
+    async def handle_translate_section(self, chat_id, message_id, query_data):
+        """Handle translating a specific section of an article"""
+        # Extract section index
+        section_index = int(query_data.split(':', 1)[1])
+        
+        # Get user data
+        user_data = USER_DATA[chat_id]
+        article = user_data.get('current_article')
+        sections = user_data.get('article_sections', [])
+        
+        if not article or not sections or section_index >= len(sections):
+            await self.bot.sendMessage(
+                chat_id,
+                "Section data not found. Please start a new search with /start."
+            )
+            return
+        
+        # Get source language
+        source_lang = user_data.get('language', DEFAULT_LANGUAGE)
+        
+        # Show translation language options
+        keyboard = []
+        translation_languages = [
+            "en", "es", "fr", "de", "it", "pt", "ru", "ja", "zh", "ko", "ar"
+        ]
+        
+        # Remove current language from options
+        if source_lang in translation_languages:
+            translation_languages.remove(source_lang)
+        
+        # Create keyboard with translation options
+        row = []
+        for i, lang_code in enumerate(translation_languages):
+            button = InlineKeyboardButton(
+                text=get_language_name(lang_code), 
+                callback_data=f"section_translate:{section_index}:{lang_code}"
+            )
+            row.append(button)
+            
+            # 2 buttons per row
+            if len(row) == 2 or i == len(translation_languages) - 1:
+                keyboard.append(row)
+                row = []
+        
+        # Add back button
+        keyboard.append([
+            InlineKeyboardButton(
+                text="Back to Section", 
+                callback_data=f"section:{section_index}"
+            )
+        ])
+        
+        await self.bot.editMessageText(
+            (chat_id, message_id),
+            f"Translate this section to:",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard)
+        )
+        
+    async def handle_section_translate(self, chat_id, message_id, query_data):
+        """Process section translation to the selected language"""
+        # Extract data from callback query
+        parts = query_data.split(':')
+        section_index = int(parts[1])
+        target_lang = parts[2]
+        
+        # Get user data
+        user_data = USER_DATA[chat_id]
+        article = user_data.get('current_article')
+        sections = user_data.get('article_sections', [])
+        source_lang = user_data.get('language', DEFAULT_LANGUAGE)
+        
+        if not article or not sections or section_index >= len(sections):
+            await self.bot.sendMessage(
+                chat_id,
+                "Section data not found. Please start a new search with /start."
+            )
+            return
+        
+        # Get the section to translate
+        section = sections[section_index]
+        
+        # Show loading message
+        await self.bot.editMessageText(
+            (chat_id, message_id),
+            f"Translating section from {get_language_name(source_lang)} to {get_language_name(target_lang)}..."
+        )
+        
+        try:
+            # Translate section title if it exists
+            title = section['title']
+            if title:
+                translated_title = translate_text(title, target_lang, source_lang)
+            else:
+                if section_index == 0:
+                    translated_title = translate_text(article['title'], target_lang, source_lang)
+                else:
+                    translated_title = ""
+            
+            # Translate section content
+            translated_content = translate_text(section['content'], target_lang, source_lang)
+            
+            # Create keyboard with back buttons
+            keyboard = [
+                [InlineKeyboardButton(
+                    text="Back to Original Section", 
+                    callback_data=f"section:{section_index}"
+                )],
+                [InlineKeyboardButton(
+                    text="Back to Article", 
+                    callback_data="back_to_article"
+                )]
+            ]
+            
+            # Format the translated section
+            if translated_title:
+                message = f"*{translated_title}*\n\n{translated_content}\n\n"
+            else:
+                message = f"{translated_content}\n\n"
+                
+            message += (
+                f"_Translated from {get_language_name(source_lang)} to {get_language_name(target_lang)}_\n"
+                f"_Section {section_index + 1} of {len(sections)}_"
+            )
+            
+            # Make sure we don't exceed message limits
+            if len(message) > 4000:
+                message = message[:3997] + "..."
+                
+            await self.bot.editMessageText(
+                (chat_id, message_id),
+                message,
+                parse_mode="Markdown",
+                reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard)
+            )
+            
+        except Exception as e:
+            logger.error(f"Section translation error: {str(e)}")
+            
+            await self.bot.editMessageText(
+                (chat_id, message_id),
+                f"Translation error: {str(e)}",
+                reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
+                    InlineKeyboardButton(
+                        text="Back to Section", 
+                        callback_data=f"section:{section_index}"
+                    )
+                ]])
+            )
+            
+    async def display_translated_section(self, chat_id, message_id, article, section_index):
+        """Display a specific section of a translated article with navigation buttons"""
+        user_data = USER_DATA[chat_id]
+        sections = user_data.get('translated_sections', [])
+        
+        if not sections or section_index >= len(sections) or section_index < 0:
+            # Invalid section index, go back to translation
+            await self.handle_back_to_translation(chat_id, message_id)
+            return
+        
+        # Get the current section
+        section = sections[section_index]
+        
+        # Create section navigation buttons
+        keyboard = []
+        nav_row = []
+        
+        # Previous section button (if not first section)
+        if section_index > 0:
+            nav_row.append(InlineKeyboardButton(
+                text="◀️ Previous", 
+                callback_data=f"trans_section:{section_index-1}"
+            ))
+        
+        # Next section button (if not last section)
+        if section_index < len(sections) - 1:
+            nav_row.append(InlineKeyboardButton(
+                text="Next ▶️", 
+                callback_data=f"trans_section:{section_index+1}"
+            ))
+            
+        if nav_row:
+            keyboard.append(nav_row)
+            
+        # Back button
+        keyboard.append([
+            InlineKeyboardButton(
+                text="Back to Translation", 
+                callback_data="back_to_translation"
+            )
+        ])
+        
+        # Format section content
+        if section['title']:
+            section_title = f"*{section['title']}*\n\n"
+        else:
+            if section_index == 0:
+                section_title = f"*{article['title']}*\n\n"
+            else:
+                section_title = ""
+                
+        section_content = section['content']
+                
+        # Format the entire message
+        source_lang = user_data.get('language', DEFAULT_LANGUAGE)
+        target_lang = user_data.get('translation_language', 'en')
+        
+        message = (
+            f"{section_title}{section_content}\n\n"
+            f"_Translated from {get_language_name(source_lang)} to {get_language_name(target_lang)}_\n"
+            f"_Section {section_index + 1} of {len(sections)}_"
+        )
+        
+        # Make sure we don't exceed message limits
+        if len(message) > 4000:
+            message = message[:3997] + "..."
+            
+        try:
+            # Try to edit the existing message
+            await self.bot.editMessageText(
+                (chat_id, message_id),
+                message,
+                parse_mode="Markdown",
+                reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard)
+            )
+        except Exception as e:
+            # If there's an error (e.g., message too old), send a new message
+            logger.error(f"Error editing message: {str(e)}")
+            await self.bot.sendMessage(
+                chat_id,
+                message,
+                parse_mode="Markdown",
+                reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard)
+            )
+            
     async def handle_back_to_translation(self, chat_id, message_id):
         """Process back to translation request"""
         # Get user data
