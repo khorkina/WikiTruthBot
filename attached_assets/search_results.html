@@ -1,0 +1,79 @@
+{% extends "base.html" %}
+
+{% block title %}Search Results{% endblock %}
+
+{% block content %}
+<div class="search-results-container">
+    <div class="row">
+        <div class="col-md-10 col-lg-8 mx-auto">
+            <h2 class="search-heading">Search Results</h2>
+            <p class="search-info">
+                Searching for "<strong>{{ search_query }}</strong>" in 
+                <strong>{{ get_language_name(search_lang) }}</strong>
+            </p>
+            
+            <!-- Quick search form -->
+            <div class="card mb-4">
+                <div class="card-body">
+                    <form action="{{ url_for('search') }}" method="post" class="search-form">
+                        <div class="input-group">
+                            <select class="form-select flex-grow-0" style="max-width: 120px;" name="search_lang">
+                                {% for code, name in language_dict.items() %}
+                                <option value="{{ code }}" {% if code == search_lang %}selected{% endif %}>
+                                    {{ code }}
+                                </option>
+                                {% endfor %}
+                            </select>
+                            <input type="text" class="form-control" name="search_query" 
+                                   value="{{ search_query }}" placeholder="Search Wikipedia">
+                            <button class="btn btn-dark" type="submit">
+                                <i data-feather="search"></i>
+                            </button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+            
+            <!-- Results list -->
+            {% if search_results %}
+                <div class="results-list">
+                    {% for result in search_results %}
+                        <a href="{{ url_for('view_article', title=result, lang=search_lang) }}" class="result-item">
+                            <div class="result-card">
+                                <h3 class="result-title">{{ result }}</h3>
+                                <div class="result-actions">
+                                    <span class="btn-view">
+                                        <i data-feather="arrow-right"></i>
+                                    </span>
+                                </div>
+                            </div>
+                        </a>
+                    {% endfor %}
+                </div>
+            {% else %}
+                <div class="no-results">
+                    <p>No results found. Please try a different search term.</p>
+                    <a href="{{ url_for('home') }}" class="btn btn-outline-dark">
+                        <i data-feather="arrow-left"></i> Back to Home
+                    </a>
+                </div>
+            {% endif %}
+            
+            <!-- Back button -->
+            <div class="text-center mt-4">
+                <a href="{{ url_for('home') }}" class="btn btn-outline-dark">
+                    <i data-feather="arrow-left"></i> Back to Home
+                </a>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    document.addEventListener('DOMContentLoaded', function() {
+        feather.replace();
+    });
+</script>
+{% endblock %}

@@ -1,0 +1,80 @@
+{% extends "base.html" %}
+
+{% block title %}Home{% endblock %}
+
+{% block content %}
+<div class="search-container">
+    <div class="row justify-content-center">
+        <div class="col-md-8 col-lg-6">
+            <h2 class="search-heading text-center mb-4">Multilingual Wikipedia Search</h2>
+            
+            {% if error %}
+            <div class="alert alert-danger" role="alert">
+                {{ error }}
+            </div>
+            {% endif %}
+            
+            <div class="card search-card">
+                <div class="card-body">
+                    <form action="{{ url_for('search') }}" method="post" class="search-form">
+                        <div class="mb-3">
+                            <label for="searchLang" class="form-label">Search Language</label>
+                            <select class="form-select" id="searchLang" name="search_lang">
+                                {% for code, name in language_dict.items() %}
+                                <option value="{{ code }}" {% if code == selected_lang %}selected{% endif %}>
+                                    {{ get_language_name(code) }} ({{ code }})
+                                </option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                        
+                        <div class="mb-3">
+                            <label for="searchQuery" class="form-label">Search Wikipedia</label>
+                            <div class="input-group">
+                                <input type="text" class="form-control" id="searchQuery" name="search_query" 
+                                       placeholder="Enter your search query" required>
+                                <button class="btn btn-dark" type="submit">
+                                    <i data-feather="search"></i>
+                                </button>
+                            </div>
+                        </div>
+                    </form>
+                </div>
+            </div>
+            
+            <div class="mt-4 text-center">
+                <h3 class="features-heading">Features</h3>
+                <div class="features-list">
+                    <div class="feature-item">
+                        <i data-feather="globe"></i>
+                        <span>Search Wikipedia in multiple languages</span>
+                    </div>
+                    <div class="feature-item">
+                        <i data-feather="layers"></i>
+                        <span>Section-by-section translation</span>
+                    </div>
+                    <div class="feature-item">
+                        <i data-feather="share-2"></i>
+                        <span>Share articles on social media</span>
+                    </div>
+                    <div class="feature-item">
+                        <i data-feather="download"></i>
+                        <span>Download articles as documents</span>
+                    </div>
+                    <div class="feature-item">
+                        <i data-feather="edit-3"></i>
+                        <span>Collaborative text reviewing</span>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="donation-container text-center mt-4">
+                <p>Support this project:</p>
+                <a href="https://ko-fi.com/wikitruth" target="_blank" class="kofi-button">
+                    <i data-feather="coffee"></i> Support on Ko-fi
+                </a>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

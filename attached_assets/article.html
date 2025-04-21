@@ -1,0 +1,470 @@
+{% extends "base.html" %}
+
+{% block title %}{{ article.title }}{% endblock %}
+
+{% block head %}
+<!-- Social Sharing Script -->
+<script type="text/javascript" src="https://cdn.jsdelivr.net/npm/sharer.js@0.5.1/sharer.min.js"></script>
+<!-- Add article ID for JavaScript to use -->
+<meta name="article-id" content="{{ article.title }}_{{ lang }}">
+{% endblock %}
+
+{% block content %}
+<div class="article-container">
+    <div class="row">
+        <div class="col-md-10 col-lg-8 mx-auto">
+            <div class="article-header">
+                <h1 class="article-title">{{ article.title }}</h1>
+                
+                <div class="article-meta">
+                    <span class="language-badge">
+                        <i data-feather="globe"></i> {{ get_language_name(lang) }}
+                    </span>
+                    <a href="{{ article.url }}" target="_blank" class="wiki-link">
+                        <i data-feather="external-link"></i> View on Wikipedia
+                    </a>
+                </div>
+            </div>
+            
+            <!-- Donation bar at the top of article -->
+            <div class="donation-container article-top">
+                <a href="https://ko-fi.com/wikitruth" target="_blank" class="kofi-button">
+                    <i data-feather="coffee"></i> Support this project on Ko-fi
+                </a>
+            </div>
+            
+            <!-- Action buttons -->
+            <div class="row mb-4">
+                <div class="col-6 col-md-3 mb-2">
+                    <button class="btn btn-outline-dark w-100" data-bs-toggle="modal" data-bs-target="#languageModal">
+                        <i data-feather="globe"></i> Language
+                    </button>
+                </div>
+                <div class="col-6 col-md-3 mb-2">
+                    <button class="btn btn-outline-dark w-100" data-bs-toggle="modal" data-bs-target="#translateModal">
+                        <i data-feather="layers"></i> Translate
+                    </button>
+                </div>
+                <div class="col-6 col-md-2 mb-2">
+                    <button class="btn btn-outline-dark w-100" data-bs-toggle="modal" data-bs-target="#shareModal">
+                        <i data-feather="share-2"></i> Share
+                    </button>
+                </div>
+                <div class="col-6 col-md-2 mb-2">
+                    <button class="btn btn-outline-dark w-100" id="toggle-highlights-btn">
+                        <i data-feather="eye"></i> <span id="highlights-btn-text">Show Reviews</span>
+                    </button>
+                </div>
+                <div class="col-6 col-md-2 mb-2">
+                    <a href="{{ url_for('export_article', title=article.title, lang=lang) }}" class="btn btn-outline-dark w-100">
+                        <i data-feather="download"></i> Download
+                    </a>
+                </div>
+            </div>
+            
+            <!-- Article tabs -->
+            <div class="article-tabs">
+                <div class="article-tab active" id="summary-tab" onclick="switchTab('summary')">
+                    Summary
+                </div>
+                <div class="article-tab" id="content-tab" onclick="switchTab('content')">
+                    Full Content
+                </div>
+            </div>
+            
+            <!-- Summary tab content -->
+            <div id="summary-content" class="tab-content">
+                <div class="article-summary-container">
+                    <div class="article-summary" id="article-summary">
+                        {{ article.summary }}
+                    </div>
+                    
+                    {% if show_translation and translate_to != lang %}
+                    <div class="translate-controls">
+                        <button class="btn btn-dark translate-section-btn" 
+                                data-section="article-summary"
+                                data-from="{{ lang }}" 
+                                data-to="{{ translate_to }}">
+                            <i data-feather="refresh-cw"></i> Translate Summary
+                        </button>
+                    </div>
+                    {% endif %}
+                    
+                    <!-- Share options for summary -->
+                    <div class="share-section">
+                        <h5 class="mb-3"><i data-feather="share-2"></i> Share this article</h5>
+                        <div class="row">
+                            <!-- Twitter -->
+                            <div class="col-4 col-md-3 mb-2">
+                                <button class="btn-share btn-twitter w-100" data-sharer="twitter" 
+                                        data-title="{{ article.title }} - Read on WikiTruth"
+                                        data-url="{{ url_for('view_article', title=article.title, lang=lang, _external=True) }}">
+                                    <i data-feather="x"></i>
+                                </button>
+                            </div>
+                            <!-- Facebook -->
+                            <div class="col-4 col-md-3 mb-2">
+                                <button class="btn-share btn-facebook w-100" data-sharer="facebook" 
+                                       data-url="{{ url_for('view_article', title=article.title, lang=lang, _external=True) }}">
+                                    <i data-feather="facebook"></i>
+                                </button>
+                            </div>
+                            <!-- WhatsApp -->
+                            <div class="col-4 col-md-3 mb-2">
+                                <button class="btn-share btn-whatsapp w-100" data-sharer="whatsapp" 
+                                       data-title="{{ article.title }}"
+                                       data-url="{{ url_for('view_article', title=article.title, lang=lang, _external=True) }}">
+                                    <i data-feather="message-circle"></i>
+                                </button>
+                            </div>
+                            <!-- Copy Link -->
+                            <div class="col-12 col-md-3 mb-2">
+                                <div class="input-group">
+                                    <input type="text" id="shareLink" class="form-control" 
+                                           value="{{ url_for('view_article', title=article.title, lang=lang, _external=True) }}" readonly>
+                                    <button class="btn btn-outline-dark" onclick="copyShareLink()">
+                                        <i data-feather="copy"></i>
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Highlight interface for summary -->
+                    <div class="highlight-interface mt-3" id="highlight-interface-summary">
+                        <button class="btn btn-dark toggle-highlight-btn" 
+                                data-target="highlight-form-summary">
+                            <i data-feather="edit-3"></i> Mark for Review
+                        </button>
+                        
+                        <div class="highlight-form" id="highlight-form-summary" style="display: none;">
+                            <div class="card mt-2">
+                                <div class="card-body">
+                                    <form onsubmit="saveHighlight(event, '{{ article.title }}_{{ lang }}', 'summary')">
+                                        <div class="mb-2">
+                                            <label for="highlight-text-summary" class="form-label">Text to review:</label>
+                                            <textarea class="form-control" id="highlight-text-summary" rows="2" required
+                                                      placeholder="Copy and paste text from above that needs review"></textarea>
+                                        </div>
+                                        <button type="submit" class="btn btn-dark">
+                                            <i data-feather="check"></i> Mark for Review
+                                        </button>
+                                    </form>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Full content tab content (hidden initially) -->
+            <div id="content-content" class="tab-content" style="display: none;">
+                <!-- Table of Contents -->
+                <div class="table-of-contents">
+                    <h3 class="toc-title">Table of Contents</h3>
+                    <ul class="toc-list">
+                        {% for section in sections %}
+                            {% if section.title %}
+                                <li class="toc-item toc-level-{{ section.level }}">
+                                    <a href="#section-{{ loop.index }}">{{ section.title }}</a>
+                                </li>
+                            {% endif %}
+                        {% endfor %}
+                    </ul>
+                </div>
+                
+                <!-- Back to TOC button -->
+                <button id="back-to-toc" class="back-to-toc" title="Back to Table of Contents">
+                    <i data-feather="list"></i>
+                </button>
+                
+                <!-- Article sections -->
+                <div class="article-content-container">
+                    {% for section in sections %}
+                    <div class="content-section" id="section-{{ loop.index }}">
+                        {% if section.title %}
+                        <h{{ section.level + 1 }} class="section-heading">{{ section.title }}</h{{ section.level + 1 }}>
+                        {% endif %}
+                        
+                        <div class="section-content" id="section-content-{{ loop.index }}">
+                            {{ section.content }}
+                        </div>
+                        
+                        {% if show_translation and translate_to != lang %}
+                        <div class="translate-controls">
+                            <button class="btn btn-dark translate-section-btn" 
+                                    data-section="section-content-{{ loop.index }}"
+                                    data-from="{{ lang }}" 
+                                    data-to="{{ translate_to }}">
+                                <i data-feather="refresh-cw"></i> Translate Section
+                            </button>
+                        </div>
+                        {% endif %}
+                        
+                        <!-- Highlight interface for section -->
+                        <div class="highlight-interface mt-2" id="highlight-interface-{{ loop.index }}">
+                            <button class="btn btn-dark toggle-highlight-btn" 
+                                    data-target="highlight-form-{{ loop.index }}">
+                                <i data-feather="edit-3"></i> Mark for Review
+                            </button>
+                            
+                            <div class="highlight-form" id="highlight-form-{{ loop.index }}" style="display: none;">
+                                <div class="card mt-2">
+                                    <div class="card-body">
+                                        <form onsubmit="saveHighlight(event, '{{ article.title }}_{{ lang }}', 'section-{{ loop.index }}')">
+                                            <div class="mb-2">
+                                                <label for="highlight-text-{{ loop.index }}" class="form-label">Text to review:</label>
+                                                <textarea class="form-control" id="highlight-text-{{ loop.index }}" rows="2" required
+                                                        placeholder="Copy and paste text from above that needs review"></textarea>
+                                            </div>
+                                            <button type="submit" class="btn btn-dark">
+                                                <i data-feather="check"></i> Mark for Review
+                                            </button>
+                                        </form>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
+            
+            <!-- Ko-fi donation at the bottom -->
+            <div class="donation-container mt-4">
+                <p>Find this content useful? Support the project:</p>
+                <a href="https://ko-fi.com/wikitruth" target="_blank" class="kofi-button">
+                    <i data-feather="coffee"></i> Support on Ko-fi
+                </a>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Language Selection Modal -->
+<div class="modal fade" id="languageModal" tabindex="-1" aria-labelledby="languageModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="languageModalLabel">Select Language</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <div class="language-list">
+                    {% for lang_code, lang_title in available_languages.items() %}
+                    <form action="{{ url_for('view_article', title=lang_title) }}" method="get" class="language-item-form">
+                        <input type="hidden" name="lang" value="{{ lang_code }}">
+                        <button type="submit" class="language-item">
+                            <span class="language-name">{{ get_language_name(lang_code) }}</span>
+                            <span class="language-code">{{ lang_code }}</span>
+                        </button>
+                    </form>
+                    {% endfor %}
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Translation Modal -->
+<div class="modal fade" id="translateModal" tabindex="-1" aria-labelledby="translateModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="translateModalLabel">Translate Article</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <form action="{{ url_for('view_article', title=article.title) }}" method="get">
+                    <input type="hidden" name="lang" value="{{ lang }}">
+                    <input type="hidden" name="translate" value="true">
+                    
+                    <div class="mb-3">
+                        <label for="translateLang" class="form-label">Select language to translate to:</label>
+                        <select class="form-select" id="translateLang" name="to_lang">
+                            {% for code, name in language_dict.items() %}
+                            <option value="{{ code }}" {% if code == translate_to %}selected{% endif %}>
+                                {{ get_language_name(code) }} ({{ code }})
+                            </option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    
+                    <div class="form-text mb-3">
+                        This will enable section-by-section translation buttons throughout the article.
+                    </div>
+                    
+                    <button type="submit" class="btn btn-primary">Apply Translation</button>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Share Modal -->
+<div class="modal fade" id="shareModal" tabindex="-1" aria-labelledby="shareModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="shareModalLabel">Share Article</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <div class="share-options">
+                    <div class="row g-2">
+                        <!-- Twitter -->
+                        <div class="col-6">
+                            <button class="btn-share w-100 py-3" data-sharer="twitter" 
+                                   data-title="{{ article.title }} - Read on WikiTruth"
+                                   data-url="{{ url_for('view_article', title=article.title, lang=lang, _external=True) }}">
+                                <i data-feather="x"></i> Twitter
+                            </button>
+                        </div>
+                        <!-- Facebook -->
+                        <div class="col-6">
+                            <button class="btn-share w-100 py-3" data-sharer="facebook" 
+                                   data-url="{{ url_for('view_article', title=article.title, lang=lang, _external=True) }}">
+                                <i data-feather="facebook"></i> Facebook
+                            </button>
+                        </div>
+                        <!-- LinkedIn -->
+                        <div class="col-6">
+                            <button class="btn-share w-100 py-3" data-sharer="linkedin" 
+                                   data-url="{{ url_for('view_article', title=article.title, lang=lang, _external=True) }}">
+                                <i data-feather="linkedin"></i> LinkedIn
+                            </button>
+                        </div>
+                        <!-- WhatsApp -->
+                        <div class="col-6">
+                            <button class="btn-share w-100 py-3" data-sharer="whatsapp" 
+                                   data-title="{{ article.title }}"
+                                   data-url="{{ url_for('view_article', title=article.title, lang=lang, _external=True) }}">
+                                <i data-feather="message-circle"></i> WhatsApp
+                            </button>
+                        </div>
+                    </div>
+                    
+                    <div class="mt-4">
+                        <label for="shareModalLink" class="form-label">Copy link:</label>
+                        <div class="input-group">
+                            <input type="text" class="form-control" id="shareModalLink" 
+                                  value="{{ url_for('view_article', title=article.title, lang=lang, _external=True) }}" readonly>
+                            <button class="btn btn-outline-dark" type="button" data-target="shareModalLink">
+                                <i data-feather="copy"></i>
+                            </button>
+                        </div>
+                        <div id="copyMessage" class="form-text text-success" style="display: none;">
+                            Link copied to clipboard!
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Download Modal -->
+<div class="modal fade" id="downloadModal" tabindex="-1" aria-labelledby="downloadModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="downloadModalLabel">Download Article</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <p>Download this article as a Word document (.docx):</p>
+                
+                <div class="mb-3">
+                    <div class="card mb-3">
+                        <div class="card-body">
+                            <h6 class="mb-3">Original Article Only</h6>
+                            <div class="d-grid">
+                                <a href="{{ url_for('export_article', title=article.title, lang=lang, include_translations='false') }}" class="btn btn-outline-dark">
+                                    <i data-feather="download"></i> Download Original {{ get_language_name(lang) }} Version
+                                </a>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    {% if show_translation and translate_to != lang %}
+                    <div class="card">
+                        <div class="card-body">
+                            <h6 class="mb-3">With Translations</h6>
+                            <div class="d-grid">
+                                <a href="{{ url_for('export_article', title=article.title, lang=lang, include_translations='true', to_lang=translate_to) }}" 
+                                   class="btn btn-outline-dark">
+                                    <i data-feather="download"></i> Download With {{ get_language_name(translate_to) }} Translations
+                                </a>
+                            </div>
+                            <p class="form-text mt-2">
+                                Includes both the original text and translations side by side.
+                            </p>
+                        </div>
+                    </div>
+                    {% else %}
+                    <div class="card">
+                        <div class="card-body">
+                            <h6 class="mb-3">With Translations</h6>
+                            <p class="text-muted mb-2">To download with translations, first select a translation language in the "Translate" option.</p>
+                            <button class="btn btn-secondary w-100" disabled>
+                                <i data-feather="download"></i> Download With Translations
+                            </button>
+                        </div>
+                    </div>
+                    {% endif %}
+                </div>
+                
+                <div class="mt-3">
+                    <p class="small text-muted">The document will include:</p>
+                    <ul class="small text-muted">
+                        <li>Article title and metadata</li>
+                        <li>Summary section</li>
+                        <li>Full content with proper headings</li>
+                        <li>Source reference to Wikipedia</li>
+                        {% if show_translation and translate_to != lang %}
+                        <li>Optional translations in {{ get_language_name(translate_to) }}</li>
+                        {% endif %}
+                    </ul>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    document.addEventListener('DOMContentLoaded', function() {
+        // Initialize sharer.js
+        window.Sharer.init();
+        
+        // Setup translate section buttons
+        const translateButtons = document.querySelectorAll('.translate-section-btn');
+        if (translateButtons) {
+            translateButtons.forEach(btn => {
+                btn.addEventListener('click', function() {
+                    const sectionId = this.getAttribute('data-section');
+                    const fromLang = this.getAttribute('data-from');
+                    const toLang = this.getAttribute('data-to');
+                    
+                    if (sectionId && fromLang && toLang) {
+                        translateSection(sectionId, fromLang, toLang);
+                    }
+                });
+            });
+        }
+    });
+</script>
+{% endblock %}

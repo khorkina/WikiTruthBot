@@ -1,0 +1,77 @@
+{% extends "base.html" %}
+
+{% block title %}All Reviews{% endblock %}
+
+{% block content %}
+<div class="reviews-container">
+    <div class="row">
+        <div class="col-md-10 col-lg-8 mx-auto">
+            <h2 class="page-heading">All Marked Reviews</h2>
+            
+            {% if articles %}
+                {% for article_title, article_data in articles.items() %}
+                    <div class="article-review-card">
+                        <h3 class="article-review-title">{{ article_title }}</h3>
+                        
+                        {% for lang_code, lang_data in article_data.languages.items() %}
+                            <div class="language-review-section">
+                                <h4 class="language-review-heading">
+                                    {{ lang_data.language_name }} ({{ lang_code }})
+                                </h4>
+                                
+                                <div class="highlights-list">
+                                    {% for highlight in lang_data.highlights %}
+                                        <div class="highlight-card">
+                                            <div class="highlight-text">
+                                                <mark>{{ highlight.text }}</mark>
+                                            </div>
+                                            <div class="highlight-meta">
+                                                <span class="highlight-context">
+                                                    {% if highlight.context %}
+                                                        Section: {{ highlight.context }}
+                                                    {% else %}
+                                                        General
+                                                    {% endif %}
+                                                </span>
+                                                <span class="highlight-timestamp">
+                                                    {{ highlight.timestamp|int|timestamp_to_date }}
+                                                </span>
+                                            </div>
+                                        </div>
+                                    {% endfor %}
+                                </div>
+                                
+                                <div class="article-link-container">
+                                    <a href="{{ url_for('view_article', title=article_title, lang=lang_code) }}" 
+                                       class="btn btn-outline-dark">
+                                        <i data-feather="external-link"></i> View Article
+                                    </a>
+                                </div>
+                            </div>
+                        {% endfor %}
+                    </div>
+                {% endfor %}
+            {% else %}
+                <div class="no-reviews-message">
+                    <p>No reviews have been marked yet. To mark text for review, 
+                       browse articles and use the "Mark for Review" feature.</p>
+                </div>
+            {% endif %}
+            
+            <div class="text-center mt-4">
+                <a href="{{ url_for('home') }}" class="btn btn-outline-dark">
+                    <i data-feather="arrow-left"></i> Back to Home
+                </a>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    feather.replace();
+});
+</script>
+{% endblock %}
